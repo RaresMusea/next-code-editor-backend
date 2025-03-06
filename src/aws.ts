@@ -1,6 +1,7 @@
-import { S3Client, ListObjectsV2Command, GetObjectCommand, CopyObjectCommand, PutObjectAclCommand, ObjectCannedACL, PutObjectCommand } from "@aws-sdk/client-s3"
+import { S3Client, ListObjectsV2Command, GetObjectCommand, CopyObjectCommand, PutObjectAclCommand, ObjectCannedACL, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"
+import { Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
-import path from "path";
+import path, { resolve } from "path";
 import { Readable } from "stream";
 
 const s3 = new S3Client({
@@ -14,7 +15,6 @@ const s3 = new S3Client({
 
 
 export const fetchS3Folder = async (key: string, localPath: string): Promise<void> => {
-    console.log(key);
     try {
         const params = {
             Bucket: process.env.S3_BUCKET ?? "",
@@ -25,36 +25,42 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
         const response = await s3.send(command);
 
         if (response.Contents) {
-            // Use Promise.all to run getObject operations in parallel
-            await Promise.all(response.Contents.map(async (file) => {
-                const fileKey = file.Key;
+            // Use Promise.all to run getObject operations in parallel            
+            await Promise.all(
+                response.Contents.map(async (file) => {
+                    const fileKey = file.Key;
 
-                if (fileKey) {
-                    const getObjectParams = {
-                        Bucket: process.env.S3_BUCKET ?? "",
-                        Key: fileKey
-                    };
-                    
-                    const getObjectCommand = new GetObjectCommand(getObjectParams);
-                    const data = await s3.send(getObjectCommand);
+                    if (fileKey) {
+                        const getObjectParams = {
+                            Bucket: process.env.S3_BUCKET ?? "",
+                            Key: fileKey
+                        };
 
-                    if (data.Body) {
-                        const filePath = path.join(localPath, fileKey);
-                        const dirPath = path.dirname(filePath);
+                        const getObjectCommand = new GetObjectCommand(getObjectParams);
+                        const data = await s3.send(getObjectCommand);
 
-                        fs.mkdirSync(dirPath, { recursive: true });
+                        if (data.Body) {
+                            const relativePath = fileKey.replace(key, '');
+                            const filePath = path.join(localPath, relativePath);
+                            const dirPath = path.dirname(filePath);
 
-                        if (fileKey.endsWith('/')) {
-                            return;
+                            if (!fs.existsSync(dirPath)) {
+                                fs.mkdirSync(dirPath, { recursive: true });
+                            }
+
+                            if (fileKey.endsWith('/')) {
+                                return;
+                            }
+
+                            const bodyStream = data.Body as Readable;
+                            const writeStream = fs.createWriteStream(filePath);
+                            bodyStream.pipe(writeStream);
+                            //bodyStream.pipe(writeStream);
+                            console.log(`Downloaded ${fileKey} to ${filePath}`);
                         }
-
-                        const bodyStream = data.Body as Readable;
-                        const writeStream = fs.createWriteStream(filePath);
-                        bodyStream.pipe(writeStream);
-                        console.log(`Downloaded ${fileKey} to ${filePath}`);
                     }
-                }
-            }));
+                })
+            );
         }
     } catch (error) {
         console.error('Error fetching folder:', error);
@@ -74,7 +80,7 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
         const listedObjects = await s3.send(listCommand);
 
         if (!listedObjects.Contents || listedObjects.Contents.length === 0) return;
-        
+
         // Copy each object to the new location
         await Promise.all(listedObjects.Contents.map(async (object) => {
             if (!object.Key) return;
@@ -99,6 +105,78 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
         }
     } catch (error) {
         console.error('Error copying folder:', error);
+    }
+}
+
+export async function renameS3File(sourceKey: string, destinationKey: string): Promise<void> {
+    try {
+        const copyParams = {
+            Bucket: process.env.S3_BUCKET ?? "",
+            CopySource: `${process.env.S3_BUCKET}/${sourceKey}`,
+            Key: destinationKey,
+            ACL: ObjectCannedACL.private
+        };
+
+        const copyCommand = new CopyObjectCommand(copyParams);
+        await s3.send(copyCommand);
+
+        const deleteParams = {
+            Bucket: process.env.S3_BUCKET ?? "",
+            Key: sourceKey
+        };
+
+        const deleteCommand = new DeleteObjectCommand(deleteParams);
+        await s3.send(deleteCommand);
+        console.log(`Successfully renamed ${sourceKey} to ${destinationKey}`);
+    }
+    catch (error) {
+        console.error('Error renaming object:', error);
+        throw error;
+    }
+}
+
+export async function renameS3Directory(oldPrefix: string, newPrefix: string): Promise<void> {
+    try {
+        await copyS3Folder(oldPrefix, newPrefix);
+        await deleteS3Folder(oldPrefix);
+        console.log(`Renamed directory ${oldPrefix} to ${newPrefix}.`)
+    }
+    catch (error) {
+        console.error('Error renaming directory:', error);
+        throw error;
+    }
+}
+
+export async function deleteS3Folder(prefix: string, NextContinuationToken?: string | undefined): Promise<void> {
+    try {
+        const listParams = {
+            Bucket: process.env.S3_BUCKET ?? "",
+            Prefix: prefix
+        };
+
+        const listCommand = new ListObjectsV2Command(listParams);
+        const listedObjects = await s3.send(listCommand);
+
+        if (!listedObjects.Contents || listedObjects.Contents.length === 0) return;
+
+        await Promise.all(listedObjects.Contents.map(async (object) => {
+            if (!object.Key) return;
+
+            const deleteParams = {
+                Bucket: process.env.S3_BUCKET ?? "",
+                Key: object.Key
+            };
+
+            const deleteCommand = new DeleteObjectCommand(deleteParams);
+            await s3.send(deleteCommand);
+            console.log(`Deleted ${object.Key}`);
+        }));
+
+        if (listedObjects.IsTruncated) {
+            await deleteS3Folder(prefix, listedObjects.NextContinuationToken);
+        }
+    } catch (error) {
+        console.error('Error deleting folder:', error);
     }
 }
 
@@ -127,14 +205,36 @@ function createFolder(dirName: string) {
     })
 }
 
-export const saveToS3 = async (key: string, filePath: string, content: string): Promise<void> => {
+// export const saveToS3 = async (key: string, filePath: string, content: string): Promise<void> => {
+//     const params = {
+//         Bucket: process.env.S3_BUCKET ?? "",
+//         Key: `${key}${filePath}`,
+//         Body: content,
+//         ACL: ObjectCannedACL.private
+//     }
+
+//     const putObjectCommand = new PutObjectCommand(params);
+//     await s3.send(putObjectCommand);
+// }
+
+export const saveToS3 = async (filePath: string, content: string | ReadableStream): Promise<void> => {
     const params = {
         Bucket: process.env.S3_BUCKET ?? "",
-        Key: `${key}${filePath}`,
+        Key: `code/sourceforopen${filePath}`,
         Body: content,
         ACL: ObjectCannedACL.private
-    }
+    };
 
-    const putObjectCommand = new PutObjectCommand(params);
-    await s3.send(putObjectCommand);
+
+    const upload = new Upload({
+        client: s3,
+        params: params
+    });
+
+    try {
+        await upload.done();
+    }
+    catch (error) {
+        console.error(error);
+    }
 }
