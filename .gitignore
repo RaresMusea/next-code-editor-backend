@@ -1,2 +1,3 @@
-node_modules
-tmp
+.env
+node_modules/*
+tmp/*
