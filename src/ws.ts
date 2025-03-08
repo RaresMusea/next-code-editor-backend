@@ -3,12 +3,15 @@ import { Server as HttpServer } from "http";
 import { fetchS3Folder, renameS3Directory, renameS3File, saveToS3 } from "./aws";
 import path from "path";
 import { deleteFile, fetchDir, fetchFileContent, saveFile } from "./fs";
-import fs from "fs";
+import fs from "fs/promises";
 import { TerminalManager } from "./pty";
 import { handleRenameError } from "./error_handler";
 import { validateRenaming, ValidationResult } from "./validators";
 
 const terminalManager = new TerminalManager();
+const replId = 'sourceforopen';
+const localRootPath: string = `../tmp/${replId}`
+const codeExecEngineRoot: string = path.join(__dirname, localRootPath);
 
 export function initWs(httpServer: HttpServer) {
     const io = new Server(httpServer, {
@@ -70,13 +73,15 @@ function initHandlers(socket: Socket, replId: string) {
         console.log(`Renaming ${parent}/${oldName} to ${parent}/${newName}...`);
         
         const oldFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${oldName}`);
+        console.log("Old full path: ", oldFullPath);
         const newFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${newName}`);
 
         try {
-            const validationResult: ValidationResult = validateRenaming({
+            const validationResult: ValidationResult = await validateRenaming({
                 oldName: oldName,
                 newName: newName,
-                type: type
+                type: type,
+                parent: parent,
             });
 
             if (!validationResult.isValid) {
@@ -89,7 +94,7 @@ function initHandlers(socket: Socket, replId: string) {
                 return;
             }
 
-            await fs.promises.rename(oldFullPath, newFullPath);
+            await fs.rename(oldFullPath, newFullPath);
         }
         catch (error) {
             handleRenameError({
@@ -106,7 +111,18 @@ function initHandlers(socket: Socket, replId: string) {
             await renameS3Directory(`${parent}/${oldName}`, `${parent}/${newName}`);
         }
 
-        socket.emit("renameSuccess");
+        try {
+            await fs.access(path.join(codeExecEngineRoot, `${parent}/${newName}`));
+            socket.emit("renameSuccessful", {
+                oldPath: `/${parent}/${oldName}`,
+                newPath: `/${parent}/${newName}`,
+                newName: newName
+            });
+        }
+        catch(error) {
+            socket.emit("renameError", {message:"Renaming failed", description: `Unable to rename file ${parent}/${oldName}!`});
+        }
+
     });
 
     socket.on("fetchContent", async ({ path: filePath }: { path: string }, callback) => {
@@ -118,7 +134,7 @@ function initHandlers(socket: Socket, replId: string) {
     });
 
     socket.on("deleteFile", async ({filePath}: {filePath: string}, callback) => {
-        const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`)
+        const fullPath = path.join(__dirname, `../tmp/${replId}`)
         const result = await deleteFile(fullPath);
 
         socket.emit("fileDeleted", {
