@@ -1,8 +1,10 @@
 import { S3Client, ListObjectsV2Command, GetObjectCommand, CopyObjectCommand, PutObjectAclCommand, ObjectCannedACL, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
-import path, { resolve } from "path";
+import path from "path";
 import { Readable } from "stream";
+
+const replId = 'sourceforopen'; //TO BE CHANGED
 
 const s3 = new S3Client({
     region: process.env.AWS_REGION,
@@ -112,8 +114,8 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
     try {
         const copyParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            CopySource: `${process.env.S3_BUCKET}/${sourceKey}`,
-            Key: destinationKey,
+            CopySource: `${process.env.S3_BUCKET}/code/${replId}/${sourceKey}`,
+            Key: `code/${replId}/${destinationKey}`,
             ACL: ObjectCannedACL.private
         };
 
@@ -122,7 +124,7 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
 
         const deleteParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Key: sourceKey
+            Key: `code/${replId}/${sourceKey}`
         };
 
         const deleteCommand = new DeleteObjectCommand(deleteParams);
