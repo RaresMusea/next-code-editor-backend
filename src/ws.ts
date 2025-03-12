@@ -29,7 +29,6 @@ export function initWs(httpServer: HttpServer) {
 
         if (!replId) {
             socket.disconnect();
-            console.log("NOT REPL ID");
             terminalManager.clear(socket.id);
             return;
         }
@@ -55,14 +54,14 @@ export function initWs(httpServer: HttpServer) {
 function initHandlers(socket: Socket, replId: string) {
 
     socket.on("disconnect", () => {
-        console.log("user disconnected");
+        console.log("User disconnected.");
     });
 
     socket.on("fetchDir", async (dir: string, callback) => {
         //const dirPath = path.join(__dirname, `../tmp/${replId}/${dir}`);
         const dirPath = path.join(__dirname, `../tmp/${replId}/${dir}`);
-        console.log("DIR FROM FETCH DIR: ", dirPath);
         const contents = await fetchDir(dirPath, dir);
+        console.log(contents);
         callback(contents);
     });
 
@@ -73,7 +72,6 @@ function initHandlers(socket: Socket, replId: string) {
         console.log(`Renaming ${parent}/${oldName} to ${parent}/${newName}...`);
         
         const oldFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${oldName}`);
-        console.log("Old full path: ", oldFullPath);
         const newFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${newName}`);
 
         try {
@@ -126,10 +124,9 @@ function initHandlers(socket: Socket, replId: string) {
     });
 
     socket.on("fetchContent", async ({ path: filePath }: { path: string }, callback) => {
-        //const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`);
-        console.log("FILE PATH: ", filePath);
         const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`);
         const data = await fetchFileContent(fullPath);
+        console.log("DATA: ", data)
         callback(data);
     });
 
@@ -148,7 +145,6 @@ function initHandlers(socket: Socket, replId: string) {
     socket.on("updateContent", async ({ path: filePath, content }: { path: string, content: string }) => {
         const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`);
         await saveFile(fullPath, content);
-        console.log(filePath);
         
         await saveToS3(filePath, content);
     });

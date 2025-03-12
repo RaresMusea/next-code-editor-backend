@@ -57,7 +57,6 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
                             const bodyStream = data.Body as Readable;
                             const writeStream = fs.createWriteStream(filePath);
                             bodyStream.pipe(writeStream);
-                            //bodyStream.pipe(writeStream);
                             console.log(`Downloaded ${fileKey} to ${filePath}`);
                         }
                     }
@@ -93,8 +92,6 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
                 Key: destinationKey,
                 ACL: ObjectCannedACL.private
             };
-
-            console.log(copyParams);
 
             const copyCommand = new CopyObjectCommand(copyParams);
             await s3.send(copyCommand);
@@ -139,7 +136,9 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
 
 export async function renameS3Directory(oldPrefix: string, newPrefix: string): Promise<void> {
     try {
-        await copyS3Folder(oldPrefix, newPrefix);
+        const basePath: string = `code/${replId}`;
+
+        await copyS3Folder(`${basePath}/${oldPrefix}`, `${basePath}/${newPrefix}`);
         await deleteS3Folder(oldPrefix);
         console.log(`Renamed directory ${oldPrefix} to ${newPrefix}.`)
     }
@@ -149,11 +148,11 @@ export async function renameS3Directory(oldPrefix: string, newPrefix: string): P
     }
 }
 
-export async function deleteS3Folder(prefix: string, NextContinuationToken?: string | undefined): Promise<void> {
+export async function deleteS3Folder(prefix: string| undefined, NextContinuationToken?: string | undefined): Promise<void> {
     try {
         const listParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Prefix: prefix
+            Prefix: `code/${replId}/${prefix}`
         };
 
         const listCommand = new ListObjectsV2Command(listParams);
@@ -163,6 +162,11 @@ export async function deleteS3Folder(prefix: string, NextContinuationToken?: str
 
         await Promise.all(listedObjects.Contents.map(async (object) => {
             if (!object.Key) return;
+
+            if (!object.Key.startsWith(listParams.Prefix + "/") && object.Key !== listParams.Prefix) {
+                console.warn(`Skipping ${object.Key} - not an exact match for ${listParams.Prefix}`);
+                return;
+            }
 
             const deleteParams = {
                 Bucket: process.env.S3_BUCKET ?? "",
