@@ -3,6 +3,8 @@ import { Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
 import path from "path";
 import { Readable } from "stream";
+import { logger } from "./logger";
+import e from "express";
 
 const replId = 'sourceforopen'; //TO BE CHANGED
 
@@ -33,38 +35,44 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
                     const fileKey = file.Key;
 
                     if (fileKey) {
-                        const getObjectParams = {
-                            Bucket: process.env.S3_BUCKET ?? "",
-                            Key: fileKey
-                        };
+                        if (!fileKey.endsWith('/')) {
+                            const getObjectParams = {
+                                Bucket: process.env.S3_BUCKET ?? "",
+                                Key: fileKey
+                            };
 
-                        const getObjectCommand = new GetObjectCommand(getObjectParams);
-                        const data = await s3.send(getObjectCommand);
+                            const getObjectCommand = new GetObjectCommand(getObjectParams);
+                            const data = await s3.send(getObjectCommand);
 
-                        if (data.Body) {
+                            if (data.Body) {
+                                const relativePath = fileKey.replace(key, '');
+                                const filePath = path.join(localPath, relativePath);
+                                const dirPath = path.dirname(filePath);
+
+                                if (!fs.existsSync(dirPath)) {
+                                    fs.mkdirSync(dirPath, { recursive: true });
+                                }
+
+                                const bodyStream = data.Body as Readable;
+                                const writeStream = fs.createWriteStream(filePath);
+                                bodyStream.pipe(writeStream);
+                                logger.awsInfo(`Downloaded ${fileKey} to ${filePath.replace('\\', '/')}`);
+                            }
+                        } else {
                             const relativePath = fileKey.replace(key, '');
-                            const filePath = path.join(localPath, relativePath);
-                            const dirPath = path.dirname(filePath);
+                            const dirPath = path.join(localPath, relativePath);
 
                             if (!fs.existsSync(dirPath)) {
                                 fs.mkdirSync(dirPath, { recursive: true });
+                                logger.awsInfo(`Dowloaded directory: ${dirPath}`);
                             }
-
-                            if (fileKey.endsWith('/')) {
-                                return;
-                            }
-
-                            const bodyStream = data.Body as Readable;
-                            const writeStream = fs.createWriteStream(filePath);
-                            bodyStream.pipe(writeStream);
-                            console.log(`Downloaded ${fileKey} to ${filePath}`);
                         }
                     }
                 })
             );
         }
     } catch (error) {
-        console.error('Error fetching folder:', error);
+        logger.awsError(`Error fetching folder.\n${error}`);
     }
 };
 
@@ -95,7 +103,7 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
 
             const copyCommand = new CopyObjectCommand(copyParams);
             await s3.send(copyCommand);
-            console.log(`Copied ${object.Key} to ${destinationKey}`);
+            logger.awsInfo(`Copied ${object.Key} to ${destinationKey}`);
         }));
 
         // Check if the list was truncated and continue copying if necessary
@@ -103,7 +111,23 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
             await copyS3Folder(sourcePrefix, destinationPrefix, listedObjects.NextContinuationToken);
         }
     } catch (error) {
-        console.error('Error copying folder:', error);
+        logger.awsError(`Error copying folder.\n${error}`);
+    }
+}
+
+export async function deleteS3File(sourceKey: string): Promise<void> {
+    try {
+        const deleteParams = {
+            Bucket: process.env.S3_BUCKET ?? "",
+            Key: `code/${replId}/${sourceKey}`
+        };
+
+        const deleteCommand = new DeleteObjectCommand(deleteParams);
+        await s3.send(deleteCommand);
+        logger.awsInfo(`Successfully deleted ${sourceKey} from S3.`);
+    } catch (error) {
+        logger.awsError(`Unable to delete S3 object ${sourceKey}.\n${error}`);
+        throw error;
     }
 }
 
@@ -118,18 +142,12 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
 
         const copyCommand = new CopyObjectCommand(copyParams);
         await s3.send(copyCommand);
+        await deleteS3File(sourceKey);
 
-        const deleteParams = {
-            Bucket: process.env.S3_BUCKET ?? "",
-            Key: `code/${replId}/${sourceKey}`
-        };
-
-        const deleteCommand = new DeleteObjectCommand(deleteParams);
-        await s3.send(deleteCommand);
-        console.log(`Successfully renamed ${sourceKey} to ${destinationKey}`);
+        logger.awsInfo(`Successfully renamed ${sourceKey} to ${destinationKey}`);
     }
     catch (error) {
-        console.error('Error renaming object:', error);
+        logger.awsError(`Unable to rename object ${sourceKey}.\n${error}`);
         throw error;
     }
 }
@@ -140,15 +158,15 @@ export async function renameS3Directory(oldPrefix: string, newPrefix: string): P
 
         await copyS3Folder(`${basePath}/${oldPrefix}`, `${basePath}/${newPrefix}`);
         await deleteS3Folder(oldPrefix);
-        console.log(`Renamed directory ${oldPrefix} to ${newPrefix}.`)
+        logger.awsInfo(`Renamed directory ${oldPrefix} to ${newPrefix}.`)
     }
     catch (error) {
-        console.error('Error renaming directory:', error);
+        logger.awsInfo(`Unable to remove S3 directory ${oldPrefix}.\n${error}`);
         throw error;
     }
 }
 
-export async function deleteS3Folder(prefix: string| undefined, NextContinuationToken?: string | undefined): Promise<void> {
+export async function deleteS3Folder(prefix: string | undefined, NextContinuationToken?: string | undefined): Promise<void> {
     try {
         const listParams = {
             Bucket: process.env.S3_BUCKET ?? "",
@@ -164,7 +182,7 @@ export async function deleteS3Folder(prefix: string| undefined, NextContinuation
             if (!object.Key) return;
 
             if (!object.Key.startsWith(listParams.Prefix + "/") && object.Key !== listParams.Prefix) {
-                console.warn(`Skipping ${object.Key} - not an exact match for ${listParams.Prefix}`);
+                logger.awsTrace(`Skipping ${object.Key} - not an exact match for ${listParams.Prefix}.`);
                 return;
             }
 
@@ -175,14 +193,14 @@ export async function deleteS3Folder(prefix: string| undefined, NextContinuation
 
             const deleteCommand = new DeleteObjectCommand(deleteParams);
             await s3.send(deleteCommand);
-            console.log(`Deleted ${object.Key}`);
+            logger.awsInfo(`Deleted ${object.Key}`);
         }));
 
         if (listedObjects.IsTruncated) {
             await deleteS3Folder(prefix, listedObjects.NextContinuationToken);
         }
     } catch (error) {
-        console.error('Error deleting folder:', error);
+        logger.awsError(`Unable to delete S3 folder ${prefix}.\n${error}`);
     }
 }
 
