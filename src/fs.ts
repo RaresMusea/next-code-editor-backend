@@ -1,10 +1,14 @@
 import fs from "fs";
 import { logger } from "./logger";
 
-interface File {
+export interface File {
     type: "file" | "dir";
     name: string;
     path: string;
+}
+
+export interface ExtendedFile extends File {
+    parentDir?: string;
 }
 
 export const fetchDir = async (dir: string, baseDir: string): Promise<File[]> => {

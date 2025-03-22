@@ -2,12 +2,13 @@ import { Server, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
 import { deleteS3File, deleteS3Folder, fetchS3Folder, renameS3Directory, renameS3File, saveToS3 } from "./aws";
 import path from "path";
-import { fetchDir, fetchFileContent, fileExists, saveFile } from "./fs";
+import { ExtendedFile, fetchDir, fetchFileContent, fileExists, saveFile } from "./fs";
 import fs from "fs/promises";
 import { TerminalManager } from "./pty";
 import { handleRenameError } from "./error_handler";
 import { validateRenaming, ValidationResult } from "./validators";
 import { logger } from "./logger";
+import { File } from "./fs";
 
 const terminalManager = new TerminalManager();
 const replId = 'sourceforopen';
@@ -129,66 +130,9 @@ function initHandlers(socket: Socket, replId: string) {
         }
     });
 
-    socket.on("renameEntity", async (data) => {
-        const { oldName, newName, parentId, type } = data;
-        const parent: string = parentId.slice(1);
+    socket.on("renameEntity", async (data) => {await renameEntityHandler(socket, data, false)});
 
-        logger.debug(`Renaming ${parent}/${oldName} to ${parent}/${newName}...`);
-
-        const oldFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${oldName}`);
-        const newFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${newName}`);
-
-        try {
-            const validationResult: ValidationResult = await validateRenaming({
-                oldName: oldName,
-                newName: newName,
-                type: type,
-                parent: parent,
-            });
-
-            if (!validationResult.isValid) {
-                socket.emit("renameError", {
-                    message: "Renaming failed",
-                    description: validationResult.message
-                });
-                logger.error(`${validationResult.message}`);
-
-                return;
-            }
-
-            await fs.rename(oldFullPath, newFullPath);
-        }
-        catch (error) {
-            handleRenameError({
-                oldPath: oldFullPath,
-                newPath: newFullPath,
-                code: (error as NodeJS.ErrnoException).code,
-                socket: socket,
-            })
-        }
-
-        if (type === "file") {
-            await renameS3File(`${parent}/${oldName}`, `${parent}/${newName}`);
-        }
-        else if (type === "directory") {
-            logger.debug(`Renaming directory ${parent}/${oldName} to ${parent}/${newName}...`);
-            await renameS3Directory(`${parent}/${oldName}`, `${parent}/${newName}`);
-        }
-
-        try {
-            await fs.access(path.join(codeExecEngineRoot, `${parent}/${newName}`));
-            logger.warn(`Renamed ${parent}/${oldName} to ${parent}/${newName}.`);
-            socket.emit("renameSuccessful", {
-                oldPath: `/${parent}/${oldName}`,
-                newPath: `/${parent}/${newName}`,
-                newName: newName
-            });
-        }
-        catch (error) {
-            socket.emit("renameError", { message: "Renaming failed", description: `Unable to rename file ${parent}/${oldName}!` });
-        }
-
-    });
+    socket.on('deepRename', async (data) => { await renameEntityHandler(socket, data, true) });
 
     socket.on("fetchContent", async ({ path: filePath }: { path: string }, callback) => {
         const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`);
@@ -255,3 +199,67 @@ function initHandlers(socket: Socket, replId: string) {
         terminalManager.write(socket.id, data);
     });
 }
+
+async function renameEntityHandler(socket: Socket,
+    data: { oldName: string; newName: string; parentId: string; type: string; children?: ExtendedFile[]; },
+    isDeepRename: boolean = false) {
+    const { oldName, newName, parentId, type, children } = data;
+    const parent: string = parentId.slice(1);
+
+    logger.debug(`${isDeepRename ? "Deep-renaming" : "Renaming"} ${type} ${parent}/${oldName} to ${parent}/${newName}...`);
+
+    const oldFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${oldName}`);
+    const newFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${newName}`);
+
+    try {
+        const validationResult: ValidationResult = await validateRenaming({ oldName, newName, type, parent });
+
+        if (!validationResult.isValid) {
+            socket.emit("renameError", { message: "Renaming failed", description: validationResult.message });
+            logger.error(validationResult.message!);
+            return;
+        }
+
+        await fs.rename(oldFullPath, newFullPath);
+    } catch (error) {
+        handleRenameError({
+            oldPath: oldFullPath,
+            newPath: newFullPath,
+            code: (error as NodeJS.ErrnoException).code,
+            socket,
+        });
+        return;
+    }
+
+    if (type === "file") {
+        await renameS3File(`${parent}/${oldName}`, `${parent}/${newName}`);
+    } else if (type === "directory") {
+        await renameS3Directory(`${parent}/${oldName}`, `${parent}/${newName}`);
+    }
+
+    try {
+        await fs.access(path.join(codeExecEngineRoot, `${parent}/${newName}`));
+        logger.warn(`Renamed ${parent}/${oldName} to ${parent}/${newName}.`);
+
+        let response: { oldPath: string; newPath: string; newName: string; children?: ExtendedFile[] } = {
+            oldPath: `/${parent}/${oldName}`,
+            newPath: `/${parent}/${newName}`,
+            newName,
+        };
+
+        if (isDeepRename) {
+            response.children = children?.map((child: ExtendedFile) => ({
+                ...child,
+                path: child.path.replace(oldName, newName),
+                parentDir: child.parentDir?.includes(oldName)
+                    ? child.parentDir.replace(oldName, newName)
+                    : child.parentDir,
+            }));
+            socket.emit("deepRenameSuccessful", response);
+        } else {
+            socket.emit("renameSuccessful", response);
+        }
+    } catch (error) {
+        socket.emit("renameError", { message: "Renaming failed", description: `Unable to rename file ${parent}/${oldName}!` });
+    }
+};
