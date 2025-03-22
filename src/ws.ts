@@ -2,7 +2,7 @@ import { Server, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
 import { fetchS3Folder, renameS3Directory, renameS3File, saveToS3 } from "./aws";
 import path from "path";
-import { deleteFile, fetchDir, fetchFileContent, saveFile } from "./fs";
+import { deleteFile, fetchDir, fetchFileContent, fileExists, saveFile } from "./fs";
 import fs from "fs/promises";
 import { TerminalManager } from "./pty";
 import { handleRenameError } from "./error_handler";
@@ -63,6 +63,32 @@ function initHandlers(socket: Socket, replId: string) {
         const contents = await fetchDir(dirPath, dir);
         console.log(contents);
         callback(contents);
+    });
+
+    socket.on("createFile", async ({ newName, parentDir }: { newName: string, parentDir: string }) => {
+        const absoluteNewFilePath: string = path.join(__dirname, `../tmp/${replId}${parentDir}/${newName}`);
+
+        if (fileExists(absoluteNewFilePath)) {
+            socket.emit('fileCreationFailed', {
+                message: "Unable to create file",
+                description: `File ${newName} already exists in ${parentDir}!`
+            })
+        }
+
+        try {
+            await fs.writeFile(absoluteNewFilePath, "");
+            socket.emit('fileCreated', {
+                name: newName,
+                parentDir: parentDir,
+                path: `${parentDir}/${newName}`
+            });
+        }
+        catch (error) {
+            socket.emit('fileCreationFailed', {
+                message: "Unable to create file",
+                description: `An error occurred while attempting to create file ${newName}!`
+            });
+        }
     });
 
     socket.on("renameEntity", async (data) => {

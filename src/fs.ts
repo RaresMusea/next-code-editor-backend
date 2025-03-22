@@ -33,6 +33,18 @@ export const fetchDir = async (dir: string, baseDir: string): Promise<File[]>  =
     // }
 }
 
+export const fileExists = (absolutefilePath: string): boolean => {
+    if (!absolutefilePath) {
+        return false;
+    }
+    
+    if (fs.existsSync(absolutefilePath)) {
+        return true;
+    }
+    
+    return false;
+}
+
 export const fetchFileContent = (file: string): Promise<string> => {
     return new Promise((resolve, reject) => {
         fs.readFile(file, "utf8", (err, data) => {
