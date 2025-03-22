@@ -1,21 +1,25 @@
 import fs from "fs";
-import path from "path";
+import { logger } from "./logger";
 
-interface File {
+export interface File {
     type: "file" | "dir";
     name: string;
     path: string;
 }
 
-export const fetchDir = async (dir: string, baseDir: string): Promise<File[]>  => {
+export interface ExtendedFile extends File {
+    parentDir?: string;
+}
+
+export const fetchDir = async (dir: string, baseDir: string): Promise<File[]> => {
     return new Promise((resolve, reject) => {
         fs.readdir(dir, { withFileTypes: true }, (err, files) => {
             if (err) {
                 reject(err);
             } else {
-                resolve(files.map(file => ({ type: file.isDirectory() ? "dir" : "file", name: file.name, path: `${baseDir}/${file.name}`})));
+                resolve(files.map(file => ({ type: file.isDirectory() ? "dir" : "file", name: file.name, path: `${baseDir}/${file.name}` })));
             }
-        });       
+        });
     });
 
     // try {
@@ -34,15 +38,12 @@ export const fetchDir = async (dir: string, baseDir: string): Promise<File[]>  =
 }
 
 export const fileExists = (absolutefilePath: string): boolean => {
-    if (!absolutefilePath) {
+    try {
+        return fs.existsSync(absolutefilePath);
+    } catch (err) {
+        logger.error("Unable to check if file exists!");
         return false;
     }
-    
-    if (fs.existsSync(absolutefilePath)) {
-        return true;
-    }
-    
-    return false;
 }
 
 export const fetchFileContent = (file: string): Promise<string> => {
@@ -54,24 +55,6 @@ export const fetchFileContent = (file: string): Promise<string> => {
                 resolve(data);
             }
         });
-    })
-}
-
-export const deleteFile = async (filePath: string): Promise<string> => {
-    if (!fs.existsSync(filePath)) {
-        console.error(`The specified path does not exist - ${filePath}`);
-        return "Circ";
-    }
-
-    return new Promise((resolve, reject) => {
-        fs.unlink(filePath, err => {
-            if (err) {
-                reject(err);
-            }
-            else {
-                resolve(filePath);
-            }
-        })
     })
 }
 

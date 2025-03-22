@@ -9,7 +9,6 @@ export function initHttp(app: Express) {
     app.post("/project", async (req, res) => {
         // Hit a database to ensure this slug isn't taken already
         const { replId, language } = req.body;
-        console.log(req.body);
 
         if (!replId) {
             res.status(400).send("Bad request");

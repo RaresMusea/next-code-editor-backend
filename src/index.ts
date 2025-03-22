@@ -5,26 +5,27 @@ import { createServer } from "http";
 import { initWs } from "./ws";
 import { initHttp } from "./http";
 import cors from "cors";
+import { logger } from "./logger";
 
 const app = express();
 
-console.log(`App started`);
+logger.debug('App started.');
 
 app.use(cors());
 const httpServer = createServer(app);
 
 try {
   initWs(httpServer);
-  console.log("WebSocket initialized");
+  logger.debug("WebSockets initialized successfully!");
 } catch (err) {
-  console.error("Error initializing WebSocket:", err);
+  logger.error(`Unable to initialize WebSockets.\n${err}`);
 }
 
 initHttp(app);
 
 const port = process.env.PORT || 3001;
 httpServer.listen(port, () => {
-  console.log(`listening on *:${port}`);
+  console.log(`Listening on *:${port}`);
 }).on("error", (err) => {
-  console.error("Error starting server:", err);
+  logger.error(`Unable to start server!\n${err}`);
 });
