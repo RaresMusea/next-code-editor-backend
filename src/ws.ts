@@ -69,14 +69,19 @@ function initHandlers(socket: Socket, replId: string) {
         const absoluteNewFilePath: string = path.join(__dirname, `../tmp/${replId}${parentDir}/${newName}`);
 
         if (fileExists(absoluteNewFilePath)) {
+            console.error(`[ERROR]: File ${newName} already exists in ${parentDir}!`);
             socket.emit('fileCreationFailed', {
                 message: "Unable to create file",
                 description: `File ${newName} already exists in ${parentDir}!`
-            })
+            });
+            return;
         }
 
         try {
-            await fs.writeFile(absoluteNewFilePath, "");
+            await saveFile(absoluteNewFilePath, '');
+            await saveToS3(`${parentDir}/${newName}`, '');
+            console.info(`[INFO]: Created file ${newName} in ${parentDir}.`);
+
             socket.emit('fileCreated', {
                 name: newName,
                 parentDir: parentDir,
