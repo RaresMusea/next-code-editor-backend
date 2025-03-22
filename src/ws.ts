@@ -44,7 +44,7 @@ export function initWs(httpServer: HttpServer) {
             });
         }
         catch (error) {
-            console.error(error);
+            console.error(`[ERROR]: ${error}`);
         }
 
         initHandlers(socket, replId);
@@ -54,14 +54,13 @@ export function initWs(httpServer: HttpServer) {
 function initHandlers(socket: Socket, replId: string) {
 
     socket.on("disconnect", () => {
-        console.log("User disconnected.");
+        console.info("[INFO]: User disconnected.");
     });
 
     socket.on("fetchDir", async (dir: string, callback) => {
         //const dirPath = path.join(__dirname, `../tmp/${replId}/${dir}`);
         const dirPath = path.join(__dirname, `../tmp/${replId}/${dir}`);
         const contents = await fetchDir(dirPath, dir);
-        console.log(contents);
         callback(contents);
     });
 
@@ -89,9 +88,42 @@ function initHandlers(socket: Socket, replId: string) {
             });
         }
         catch (error) {
+            console.error(`[ERROR]: Unable to create file ${newName} in ${parentDir}!`);
             socket.emit('fileCreationFailed', {
                 message: "Unable to create file",
                 description: `An error occurred while attempting to create file ${newName}!`
+            });
+        }
+    });
+
+    socket.on("createDirectory", async ({ newName, parentDir }: { newName: string, parentDir: string }) => {
+        const absoluteNewDirPath: string = path.join(__dirname, `../tmp/${replId}${parentDir}/${newName}`);
+
+        if (fileExists(absoluteNewDirPath)) {
+            console.error(`[ERROR]: Directory ${newName} already exists in ${parentDir}!`);
+            socket.emit('directoryCreationFailed', {
+                message: "Unable to create directory",
+                description: `Directory ${newName} already exists in ${parentDir}!`
+            });
+            return;
+        }
+
+        try {
+            await fs.mkdir(absoluteNewDirPath);
+            await saveToS3(`${parentDir}/${newName}/`, '');
+            console.info(`[INFO]: Created directory ${newName} in ${parentDir}.`);
+
+            socket.emit('directoryCreated', {
+                name: newName,
+                parentDir: parentDir,
+                path: `${parentDir}/${newName}`
+            });
+        }
+        catch (error) {
+            console.error(`[ERROR]: Unable to create directory ${newName} in ${parentDir}!`);
+            socket.emit('directoryCreationFailed', {
+                message: "Unable to create directory",
+                description: `An error occurred while attempting to create directory ${newName}!`
             });
         }
     });
@@ -118,7 +150,7 @@ function initHandlers(socket: Socket, replId: string) {
                     message: "Renaming failed",
                     description: validationResult.message
                 });
-                console.error(validationResult.message);
+                console.error(`[ERROR]: ${validationResult.message}`);
 
                 return;
             }
@@ -157,7 +189,6 @@ function initHandlers(socket: Socket, replId: string) {
     socket.on("fetchContent", async ({ path: filePath }: { path: string }, callback) => {
         const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`);
         const data = await fetchFileContent(fullPath);
-        console.log("DATA: ", data)
         callback(data);
     });
 
