@@ -10,7 +10,7 @@ enum LogLevel {
 }
 
 class ServerLogger {
-    private currentLogLevel: LogLevel;
+    private readonly currentLogLevel: LogLevel;
 
     constructor(level: LogLevel = LogLevel.DEBUG) {
         this.currentLogLevel = level;

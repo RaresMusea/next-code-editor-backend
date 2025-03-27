@@ -170,6 +170,7 @@ function initHandlers(socket: Socket, replId: string) {
             });
         } catch (error) {
             logger.error(`Unable to delete ${filePath}!\n${error}`);
+            console.log(error);
             socket.emit("deleteError", {
                 message: "Deletion failed",
                 description: `An error occurred while attempting to delete ${filePath}!`
@@ -239,12 +240,13 @@ async function renameEntityHandler(socket: Socket,
 
     try {
         await fs.access(path.join(codeExecEngineRoot, `${parent}/${newName}`));
-        logger.warn(`Renamed ${parent}/${oldName} to ${parent}/${newName}.`);
+        logger.info(`${isDeepRename ? 'Deep-renamed' : 'Renamed'} ${parent}/${oldName} to ${parent}/${newName}.`);
 
-        let response: { oldPath: string; newPath: string; newName: string; children?: ExtendedFile[] } = {
+        let response: { oldPath: string; newPath: string; newName: string; type: string, children?: ExtendedFile[] } = {
             oldPath: `/${parent}/${oldName}`,
             newPath: `/${parent}/${newName}`,
             newName,
+            type
         };
 
         if (isDeepRename) {
