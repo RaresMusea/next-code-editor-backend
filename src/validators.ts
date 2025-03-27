@@ -14,7 +14,6 @@ export interface ValidationResult {
 }
 
 const replId: string = 'sourceforopen'; //TO BE CHANGED
-const projectName = 'Project';
 const localRootPath: string = `../tmp/${replId}`
 const codeExecEngineRoot: string = path.join(__dirname, localRootPath);
 

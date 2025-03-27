@@ -1,12 +1,11 @@
 //@ts-ignore => someone fix this
 import { fork, IPty } from 'node-pty';
 import path from "path";
-import os from "os";
 
 const SHELL = 'C:/Program Files/Git/bin/bash.exe';
 
 export class TerminalManager {
-    private sessions: { [id: string]: {terminal: IPty, replId: string;} } = {};
+    private readonly sessions: { [id: string]: {terminal: IPty, replId: string;} } = {};
 
     constructor() {
         this.sessions = {};

@@ -1,10 +1,16 @@
-import { S3Client, ListObjectsV2Command, GetObjectCommand, CopyObjectCommand, PutObjectAclCommand, ObjectCannedACL, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"
-import { Upload } from "@aws-sdk/lib-storage";
+import {
+    S3Client,
+    ListObjectsV2Command,
+    GetObjectCommand,
+    CopyObjectCommand,
+    ObjectCannedACL,
+    DeleteObjectCommand
+} from "@aws-sdk/client-s3"
+import {Upload} from "@aws-sdk/lib-storage";
 import fs from "fs";
 import path from "path";
-import { Readable } from "stream";
-import { logger } from "./logger";
-import e from "express";
+import {Readable} from "stream";
+import {logger} from "./logger";
 
 const replId = 'sourceforopen'; //TO BE CHANGED
 
@@ -50,7 +56,7 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
                                 const dirPath = path.dirname(filePath);
 
                                 if (!fs.existsSync(dirPath)) {
-                                    fs.mkdirSync(dirPath, { recursive: true });
+                                    fs.mkdirSync(dirPath, {recursive: true});
                                 }
 
                                 const bodyStream = data.Body as Readable;
@@ -63,7 +69,7 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
                             const dirPath = path.join(localPath, relativePath);
 
                             if (!fs.existsSync(dirPath)) {
-                                fs.mkdirSync(dirPath, { recursive: true });
+                                fs.mkdirSync(dirPath, {recursive: true});
                                 logger.awsInfo(`Dowloaded directory: ${dirPath}`);
                             }
                         }
@@ -145,8 +151,7 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
         await deleteS3File(sourceKey);
 
         logger.awsInfo(`Successfully renamed ${sourceKey} to ${destinationKey}`);
-    }
-    catch (error) {
+    } catch (error) {
         logger.awsError(`Unable to rename object ${sourceKey}.\n${error}`);
         throw error;
     }
@@ -159,14 +164,13 @@ export async function renameS3Directory(oldPrefix: string, newPrefix: string): P
         await copyS3Folder(`${basePath}/${oldPrefix}`, `${basePath}/${newPrefix}`);
         await deleteS3Folder(oldPrefix);
         logger.awsInfo(`Renamed directory ${oldPrefix} to ${newPrefix}.`)
-    }
-    catch (error) {
+    } catch (error) {
         logger.awsInfo(`Unable to remove S3 directory ${oldPrefix}.\n${error}`);
         throw error;
     }
 }
 
-export async function deleteS3Folder(prefix: string | undefined, NextContinuationToken?: string | undefined): Promise<void> {
+export async function deleteS3Folder(prefix: string | undefined): Promise<void> {
     try {
         const listParams = {
             Bucket: process.env.S3_BUCKET ?? "",
@@ -197,36 +201,11 @@ export async function deleteS3Folder(prefix: string | undefined, NextContinuatio
         }));
 
         if (listedObjects.IsTruncated) {
-            await deleteS3Folder(prefix, listedObjects.NextContinuationToken);
+            await deleteS3Folder(prefix);
         }
     } catch (error) {
         logger.awsError(`Unable to delete S3 folder ${prefix}.\n${error}`);
     }
-}
-
-function writeFile(filePath: string, fileData: Buffer): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-        await createFolder(path.dirname(filePath));
-
-        fs.writeFile(filePath, fileData, (err) => {
-            if (err) {
-                reject(err)
-            } else {
-                resolve()
-            }
-        })
-    });
-}
-
-function createFolder(dirName: string) {
-    return new Promise<void>((resolve, reject) => {
-        fs.mkdir(dirName, { recursive: true }, (err) => {
-            if (err) {
-                return reject(err)
-            }
-            resolve()
-        });
-    })
 }
 
 // export const saveToS3 = async (key: string, filePath: string, content: string): Promise<void> => {
@@ -257,8 +236,7 @@ export const saveToS3 = async (filePath: string, content: string | ReadableStrea
 
     try {
         await upload.done();
-    }
-    catch (error) {
+    } catch (error) {
         console.error(error);
     }
 }
