@@ -4,13 +4,20 @@ import {
     GetObjectCommand,
     CopyObjectCommand,
     ObjectCannedACL,
-    DeleteObjectCommand
+    DeleteObjectCommand,
+    ListObjectsV2CommandOutput
 } from "@aws-sdk/client-s3"
-import {Upload} from "@aws-sdk/lib-storage";
+import { Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
 import path from "path";
-import {Readable} from "stream";
-import {logger} from "./logger";
+import { Readable } from "stream";
+import { logger } from "./logger";
+import { formatDate } from "../utils/dateFormatter";
+
+interface FolderDetails {
+    name: string;
+    lastModified: string | null;
+}
 
 const replId = 'sourceforopen'; //TO BE CHANGED
 
@@ -23,6 +30,75 @@ const s3 = new S3Client({
     endpoint: process.env.S3_ENDPOINT
 });
 
+export const getFolderDetails = async (key: string): Promise<FolderDetails[] | undefined> => {
+    try {
+        const params = {
+            Bucket: process.env.S3_BUCKET ?? '',
+            Prefix: key,
+            Delimiter: '/'
+        };
+
+        const command = new ListObjectsV2Command(params);
+        const response = await s3.send(command);
+
+        const folders = response.CommonPrefixes?.map(folder =>
+            folder.Prefix!.replace(key, "").split("/")[0]
+        ).filter((value, index, self) => value && self.indexOf(value) === index) ?? [];
+
+        const folderDetails: FolderDetails[] = await Promise.all(
+            folders.map(async (folderName) => {
+                const folderPath = `${key}${folderName}/`;
+
+                const subParams = {
+                    Bucket: process.env.S3_BUCKET ?? '',
+                    Prefix: folderPath
+                };
+
+                const subCommand = new ListObjectsV2Command(subParams);
+                const subResponse = await s3.send(subCommand);
+
+                const lastModified = subResponse.Contents
+                    ?.map(item => item.LastModified)
+                    .filter(Boolean)
+                    .sort((a, b) => b!.getTime() - a!.getTime())[0] || null;
+
+                return {
+                    name: folderName,
+                    lastModified: lastModified ? lastModified.toDateString() : null
+                };
+            })
+        );
+
+        return folderDetails;
+
+    } catch (error) {
+        logger.error(error as string);
+        return [];
+    }
+}
+
+export const folderExists = async (key: string): Promise<boolean> => {
+    console.warn(key);
+    const params = {
+        Bucket: process.env.S3_BUCKET ?? '',
+        Prefix: `base/Java/${key}`,
+    };
+
+    try {
+        const command = new ListObjectsV2Command(params);
+        const response = await s3.send(command);
+
+        if (response.Contents && response.Contents.length > 0) {
+            console.warn(response.Contents);
+            return response.Contents.some(c => c.Key?.startsWith(params.Prefix));
+        }
+    } catch (error) {
+        logger.awsError(error as string);
+        return false;
+    }
+
+    return false;
+}
 
 export const fetchS3Folder = async (key: string, localPath: string): Promise<void> => {
     try {
@@ -56,7 +132,7 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
                                 const dirPath = path.dirname(filePath);
 
                                 if (!fs.existsSync(dirPath)) {
-                                    fs.mkdirSync(dirPath, {recursive: true});
+                                    fs.mkdirSync(dirPath, { recursive: true });
                                 }
 
                                 const bodyStream = data.Body as Readable;
@@ -69,7 +145,7 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
                             const dirPath = path.join(localPath, relativePath);
 
                             if (!fs.existsSync(dirPath)) {
-                                fs.mkdirSync(dirPath, {recursive: true});
+                                fs.mkdirSync(dirPath, { recursive: true });
                                 logger.awsInfo(`Dowloaded directory: ${dirPath}`);
                             }
                         }
@@ -83,6 +159,8 @@ export const fetchS3Folder = async (key: string, localPath: string): Promise<voi
 };
 
 export async function copyS3Folder(sourcePrefix: string, destinationPrefix: string, continuationToken?: string): Promise<void> {
+    logger.awsTrace(`Copying ${sourcePrefix} to ${destinationPrefix}... `);
+
     try {
         // List all objects in the source folder
         const listParams = {
@@ -117,7 +195,7 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
             await copyS3Folder(sourcePrefix, destinationPrefix, listedObjects.NextContinuationToken);
         }
     } catch (error) {
-        logger.awsError(`Error copying folder.\n${error}`);
+        logger.error(`Error copying folder.\n${error}`);
     }
 }
 
