@@ -8,6 +8,13 @@ export interface RenameData {
     parent: string | undefined;
 }
 
+export interface ProjectCreationData {
+    projectName: string;
+    description?: string;
+    template: string;
+    framework?: string;
+}
+
 export interface ValidationResult {
     isValid: boolean;
     message?: string;
@@ -74,3 +81,36 @@ export const validateRenaming = async (data: RenameData): Promise<ValidationResu
 
     return { isValid: true };
 };
+
+export const validateProjectCreation = (data: ProjectCreationData): ValidationResult => {
+    const { projectName, description, framework, template } = data;
+    const availableTemplates: string[] = ['Java', 'C++', 'Empty project'];
+    const availableFrameworks: Record<string, string[]> = {
+        Java: ["Spring", "No framework"],
+        "C++": ["No frameworks"],
+        "Empty project": []
+    };
+
+    const isValidProjectName: boolean = /^[a-zA-Z0-9_-]+$/.test(projectName);
+
+    if (!projectName || !isValidProjectName) {
+        return { isValid: false, message: 'Invalid project name! Use only letters, numbers, "-", and "_".' };
+    }
+
+    if (description && description.length > 3000) {
+        return { isValid: false, message: "Description must not exceed 3000 characters." };
+    }
+
+    if (!template || !availableTemplates.includes(template)) {
+        return { isValid: false, message: "Invalid template. Choose from: " + availableTemplates.join(", ") };
+    }
+
+    if (framework && (!availableFrameworks[template] || !availableFrameworks[template].includes(framework))) {
+        return {
+            isValid: false,
+            message: `Invalid framework '${framework}' for template '${template}'. Choose from: ${availableFrameworks[template].join(", ") || "No framework"}`
+        };
+    }
+
+    return { isValid: true };
+}
