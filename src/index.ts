@@ -2,11 +2,11 @@ import dotenv from "dotenv"
 dotenv.config()
 import express from "express";
 import { createServer } from "http";
-import { initWs } from "./ws";
-import { initHttp } from "./http";
+import { initWs } from "./web_sockets/ws";
+import { initHttp } from "./http/http";
 import cors from "cors";
-import { logger } from "./logger";
-import projectRoutes from '../routes/projects';
+import { logger } from "./logging/logger";
+import projectRoutes from './routes/projects';
 
 const app = express();
 

@@ -1,14 +1,13 @@
 import { Server, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
-import { deleteS3File, deleteS3Folder, fetchS3Folder, renameS3Directory, renameS3File, saveToS3 } from "./aws";
+import { deleteS3File, deleteS3Folder, fetchS3Folder, renameS3Directory, renameS3File, saveToS3 } from "../aws/aws";
 import path from "path";
-import { ExtendedFile, fetchDir, fetchFileContent, fileExists, saveFile } from "./fs";
+import { ExtendedFile, fetchDir, fetchFileContent, fileExists, saveFile } from "../filesystem/fs";
 import fs from "fs/promises";
-import { TerminalManager } from "./pty";
-import { handleRenameError } from "./error_handler";
-import { validateRenaming, ValidationResult } from "./validators";
-import { logger } from "./logger";
-import { File } from "./fs";
+import { TerminalManager } from "../pseudoterminal/pty";
+import { handleRenameError } from "../error_handler";
+import { validateRenaming, ValidationResult } from "../validation/validators";
+import { logger } from "../logging/logger";
 
 const terminalManager = new TerminalManager();
 const replId = 'sourceforopen';

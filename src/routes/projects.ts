@@ -1,8 +1,8 @@
 import { Router, Express, Request, Response } from "express";
-import { copyS3Folder, folderExists, getFolderDetails } from "../src/aws";
-import { validateProjectCreation, ValidationResult } from "../src/validators";
+import { copyS3Folder, folderExists, getFolderDetails } from "../aws/aws";
+import { validateProjectCreation, ValidationResult } from "../validation/validators";
 import { getProjectType } from "../utils/projectTypeRetriever";
-import { logger } from "../src/logger";
+import { logger } from "../logging/logger";
 
 
 const router = Router();

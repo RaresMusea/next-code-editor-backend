@@ -5,14 +5,12 @@ import {
     CopyObjectCommand,
     ObjectCannedACL,
     DeleteObjectCommand,
-    ListObjectsV2CommandOutput
 } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
 import path from "path";
 import { Readable } from "stream";
-import { logger } from "./logger";
-import { formatDate } from "../utils/dateFormatter";
+import { logger } from "../logging/logger";
 
 interface FolderDetails {
     name: string;
