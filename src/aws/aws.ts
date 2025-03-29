@@ -79,7 +79,7 @@ export const folderExists = async (key: string): Promise<boolean> => {
     console.warn(key);
     const params = {
         Bucket: process.env.S3_BUCKET ?? '',
-        Prefix: `base/Java/${key}`,
+        Prefix: `${key}`,
     };
 
     try {
