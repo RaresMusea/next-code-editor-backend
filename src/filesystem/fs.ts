@@ -1,5 +1,5 @@
 import fs from "fs";
-import { logger } from "./logger";
+import { logger } from "../logging/logger";
 
 export interface File {
     type: "file" | "dir";
