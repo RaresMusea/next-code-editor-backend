@@ -10,9 +10,9 @@ import { validateRenaming, ValidationResult } from "../validation/validators";
 import { logger } from "../logging/logger";
 
 const terminalManager = new TerminalManager();
-const replId = 'sourceforopen';
-const localRootPath: string = `../tmp/${replId}`
-const codeExecEngineRoot: string = path.join(__dirname, localRootPath);
+//const replId = 'sourceforopen';
+
+const localRoot: string = '../../tmp';
 
 export function initWs(httpServer: HttpServer) {
     const io = new Server(httpServer, {
@@ -26,17 +26,21 @@ export function initWs(httpServer: HttpServer) {
     io.on("connection", async (socket) => {
         // Auth checks should happen here
         logger.debug(`Connected socket with ID ${socket}`);
-        const replId = socket.handshake.query.roomId as string;
+        const projectId: string = socket.handshake.query.roomId as string;
 
-        if (!replId) {
+        if (!projectId) {
             socket.disconnect();
             terminalManager.clear(socket.id);
             return;
         }
 
-        const s3Prefix = `code/${replId}/Project`;
-        const localDir = path.join(__dirname, `../tmp/${replId}/Project`);
-        const editorRoot = path.join(__dirname, `../tmp/${replId}`);
+        const localProjectId: string = projectId.replace('code/', '');
+
+        //Before: code/sourceforopen/TestProj
+
+        const s3Prefix: string = `${projectId}`;
+        const localDir: string = path.join(__dirname, `${localRoot}/${localProjectId}`);
+        const editorRoot: string = path.join(__dirname, `${localRoot}/${localProjectId}`);
 
         try {
             await fetchS3Folder(s3Prefix, localDir);
@@ -48,11 +52,11 @@ export function initWs(httpServer: HttpServer) {
             logger.error(`${error}`);
         }
 
-        initHandlers(socket, replId);
+        initHandlers(socket, localProjectId);
     });
 }
 
-function initHandlers(socket: Socket, replId: string) {
+function initHandlers(socket: Socket, projectId: string) {
 
     socket.on("disconnect", () => {
         logger.debug("User disconnected.");
@@ -60,16 +64,16 @@ function initHandlers(socket: Socket, replId: string) {
 
     socket.on("fetchDir", async (dir: string, callback) => {
         //const dirPath = path.join(__dirname, `../tmp/${replId}/${dir}`);
-        const dirPath = path.join(__dirname, `../tmp/${replId}/${dir}`);
+        const dirPath = path.join(__dirname, `${localRoot}/${projectId}/${dir}`);
         const contents = await fetchDir(dirPath, dir);
         callback(contents);
     });
 
     socket.on("createFile", async ({ newName, parentDir }: { newName: string, parentDir: string }) => {
-        const absoluteNewFilePath: string = path.join(__dirname, `../tmp/${replId}${parentDir}/${newName}`);
+        const absoluteNewFilePath: string = path.join(__dirname, `${localRoot}/${projectId}${parentDir}/${newName}`);
 
         if (fileExists(absoluteNewFilePath)) {
-            console.error(`[ERROR]: File ${newName} already exists in ${parentDir}!`);
+            logger.error(`File ${newName} already exists in ${parentDir}!`);
             socket.emit('fileCreationFailed', {
                 message: "Unable to create file",
                 description: `File ${newName} already exists in ${parentDir}!`
@@ -79,7 +83,7 @@ function initHandlers(socket: Socket, replId: string) {
 
         try {
             await saveFile(absoluteNewFilePath, '');
-            await saveToS3(`${parentDir}/${newName}`, '');
+            await saveToS3(`${projectId}/${parentDir}/${newName}`, '');
             logger.info(`[INFO]: Created file ${newName} in ${parentDir}.`);
 
             socket.emit('fileCreated', {
@@ -98,7 +102,7 @@ function initHandlers(socket: Socket, replId: string) {
     });
 
     socket.on("createDirectory", async ({ newName, parentDir }: { newName: string, parentDir: string }) => {
-        const absoluteNewDirPath: string = path.join(__dirname, `../tmp/${replId}${parentDir}/${newName}`);
+        const absoluteNewDirPath: string = path.join(__dirname, `${localRoot}/${projectId}${parentDir}/${newName}`);
 
         if (fileExists(absoluteNewDirPath)) {
             console.error(`[ERROR]: Directory ${newName} already exists in ${parentDir}!`);
@@ -111,7 +115,7 @@ function initHandlers(socket: Socket, replId: string) {
 
         try {
             await fs.mkdir(absoluteNewDirPath);
-            await saveToS3(`${parentDir}/${newName}/`, '');
+            await saveToS3(`${projectId}/${parentDir}/${newName}/`, '');
             logger.info(`Created directory ${newName} in ${parentDir}.`);
 
             socket.emit('directoryCreated', {
@@ -129,12 +133,12 @@ function initHandlers(socket: Socket, replId: string) {
         }
     });
 
-    socket.on("renameEntity", async (data) => {await renameEntityHandler(socket, data, false)});
+    socket.on("renameEntity", async (data) => { await renameEntityHandler(socket, data, false, projectId) });
 
-    socket.on('deepRename', async (data) => { await renameEntityHandler(socket, data, true) });
+    socket.on('deepRename', async (data) => { await renameEntityHandler(socket, data, true, projectId) });
 
     socket.on("fetchContent", async ({ path: filePath }: { path: string }, callback) => {
-        const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`);
+        const fullPath = path.join(__dirname, `${localRoot}/${projectId}/${filePath}`);
         const data = await fetchFileContent(fullPath);
         callback(data);
     });
@@ -142,7 +146,7 @@ function initHandlers(socket: Socket, replId: string) {
     socket.on("deleteEntity", async ({ filePath, type }: { filePath: string, type: string }) => {
         logger.debug(`Deleting ${type} ${filePath}...`);
         const normalizedPath = filePath.slice(1);
-        const fullPath: string = path.join(__dirname, `../tmp/${replId}/${normalizedPath}`);
+        const fullPath: string = path.join(__dirname, `${localRoot}/${projectId}/${normalizedPath}`);
 
         if (!fileExists(fullPath)) {
             logger.error(`${fullPath} does not exist or it was removed earlier!`);
@@ -156,11 +160,11 @@ function initHandlers(socket: Socket, replId: string) {
         try {
             if (type === 'file') {
                 await fs.unlink(fullPath);
-                await deleteS3File(normalizedPath);
+                await deleteS3File(`${projectId}/${normalizedPath}`);
             }
             else if (type === 'directory') {
                 await fs.rm(fullPath, { recursive: true });
-                await deleteS3Folder(normalizedPath);
+                await deleteS3Folder(`${projectId}/${normalizedPath}`);
             }
             logger.info(`${type} ${filePath} deleted successfully.`);
             socket.emit("deletionSuccessful", {
@@ -181,14 +185,14 @@ function initHandlers(socket: Socket, replId: string) {
     // Should be validated for size
     // Should be throttled before updating S3 (or use an S3 mount)
     socket.on("updateContent", async ({ path: filePath, content }: { path: string, content: string }) => {
-        const fullPath = path.join(__dirname, `../tmp/${replId}/${filePath}`);
+        const fullPath = path.join(__dirname, `${localRoot}/${projectId}/${filePath}`);
         await saveFile(fullPath, content);
 
-        await saveToS3(filePath, content);
+        await saveToS3(`${projectId}/${filePath}`, content);
     });
 
     socket.on("requestTerminal", async () => {
-        terminalManager.createPty(socket.id, replId, (data, id) => {
+        terminalManager.createPty(socket.id, projectId, (data, id) => {
             socket.emit('terminal', {
                 data: Buffer.from(data, "utf-8")
             });
@@ -202,14 +206,14 @@ function initHandlers(socket: Socket, replId: string) {
 
 async function renameEntityHandler(socket: Socket,
     data: { oldName: string; newName: string; parentId: string; type: string; children?: ExtendedFile[]; },
-    isDeepRename: boolean = false) {
+    isDeepRename: boolean = false, projectId: string) {
     const { oldName, newName, parentId, type, children } = data;
     const parent: string = parentId.slice(1);
 
     logger.debug(`${isDeepRename ? "Deep-renaming" : "Renaming"} ${type} ${parent}/${oldName} to ${parent}/${newName}...`);
 
-    const oldFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${oldName}`);
-    const newFullPath = path.join(__dirname, `../tmp/${replId}/${parent}/${newName}`);
+    const oldFullPath = path.join(__dirname, `${localRoot}/${projectId}/${parent}/${oldName}`);
+    const newFullPath = path.join(__dirname, `${localRoot}/${projectId}/${parent}/${newName}`);
 
     try {
         const validationResult: ValidationResult = await validateRenaming({ oldName, newName, type, parent });
@@ -232,13 +236,13 @@ async function renameEntityHandler(socket: Socket,
     }
 
     if (type === "file") {
-        await renameS3File(`${parent}/${oldName}`, `${parent}/${newName}`);
+        await renameS3File(`${projectId}/${parent}/${oldName}`, `${projectId}/${parent}/${newName}`);
     } else if (type === "directory") {
-        await renameS3Directory(`${parent}/${oldName}`, `${parent}/${newName}`);
+        await renameS3Directory(`${projectId}/${parent}/${oldName}`, `${projectId}/${parent}/${newName}`);
     }
 
     try {
-        await fs.access(path.join(codeExecEngineRoot, `${parent}/${newName}`));
+        await fs.access(path.join(`${localRoot}/${projectId}`, `${parent}/${newName}`));
         logger.info(`${isDeepRename ? 'Deep-renamed' : 'Renamed'} ${parent}/${oldName} to ${parent}/${newName}.`);
 
         let response: { oldPath: string; newPath: string; newName: string; type: string, children?: ExtendedFile[] } = {

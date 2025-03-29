@@ -163,7 +163,7 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
         // List all objects in the source folder
         const listParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Prefix: sourcePrefix,
+            Prefix: `code/${sourcePrefix}`,
             ContinuationToken: continuationToken
         };
 
@@ -201,7 +201,7 @@ export async function deleteS3File(sourceKey: string): Promise<void> {
     try {
         const deleteParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Key: `code/${replId}/${sourceKey}`
+            Key: `code/${sourceKey}`
         };
 
         const deleteCommand = new DeleteObjectCommand(deleteParams);
@@ -217,8 +217,8 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
     try {
         const copyParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            CopySource: `${process.env.S3_BUCKET}/code/${replId}/${sourceKey}`,
-            Key: `code/${replId}/${destinationKey}`,
+            CopySource: `${process.env.S3_BUCKET}/code/${sourceKey}`,
+            Key: `code/${destinationKey}`,
             ACL: ObjectCannedACL.private
         };
 
@@ -235,9 +235,7 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
 
 export async function renameS3Directory(oldPrefix: string, newPrefix: string): Promise<void> {
     try {
-        const basePath: string = `code/${replId}`;
-
-        await copyS3Folder(`${basePath}/${oldPrefix}`, `${basePath}/${newPrefix}`);
+        await copyS3Folder(`code/${oldPrefix}`, `code/${newPrefix}`);
         await deleteS3Folder(oldPrefix);
         logger.awsInfo(`Renamed directory ${oldPrefix} to ${newPrefix}.`)
     } catch (error) {
@@ -250,7 +248,7 @@ export async function deleteS3Folder(prefix: string | undefined): Promise<void> 
     try {
         const listParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Prefix: `code/${replId}/${prefix}`
+            Prefix: `code/${prefix}`
         };
 
         const listCommand = new ListObjectsV2Command(listParams);
@@ -299,7 +297,7 @@ export async function deleteS3Folder(prefix: string | undefined): Promise<void> 
 export const saveToS3 = async (filePath: string, content: string | ReadableStream): Promise<void> => {
     const params = {
         Bucket: process.env.S3_BUCKET ?? "",
-        Key: `code/sourceforopen${filePath}`,
+        Key: `code/${filePath}`,
         Body: content,
         ACL: ObjectCannedACL.private
     };
