@@ -7,6 +7,25 @@ import { logger } from "../logging/logger";
 
 const router = Router();
 
+router.head('/', async (request: Request, response: Response) => {
+    const key = request.query.q as string;
+
+    console.log("KEY", key);
+
+    try {
+        if (await folderExists(`${key}`)) {
+            console.log("FILE EXISTS");
+            return response.status(200).end();
+        }
+        console.log("FILE DOES NOT EXIST");
+        return response.status(404).end();
+    } catch (error) {
+        console.log("Entered catch block");
+        logger.error(`An error occurred while ettempting to verify the existence of the project.\n${error}}`);
+        return response.status(500).json({ message: `An error occurred while ettempting to verify the existence of the project.\n${error}` });
+    }
+});
+
 router.get("/", async (request: Request, response: Response) => {
     const key = request.query.q as string;
 
@@ -31,18 +50,19 @@ router.post('/', async (request: Request, response: Response) => {
 
     const projectType: string | undefined = getProjectType(template, framework);
 
-    if (!projectType) {
-        return response.status(404).json({ message: `The pair ${template} - ${framework ?? undefined } could not be found!` });
+    if (!projectType || !(await folderExists(`base/${template}/${projectType}`))) {
+        return response.status(404).json({ message: `The pair ${template} - ${framework ?? 'no framework'} could not be found!` });
     }
 
-    if (! await folderExists(projectType)) {
-        console.error("Folderu nu exista gion");
-        return response.status(404).json({ message: `The pair ${template} - ${framework ?? undefined } could not be found!` });
+    try {
+        //Make sure sourceforopen gets changed with a real uuid once hitting a database
+        await copyS3Folder(`base/${template}/${projectType}`, `code/sourceforopen/${projectName}`);
+    } catch (error) {
+        logger.error(`Failed to copy project files.\nReason: ${error}`);
+        return response.status(500).json({ message: 'An error has occurred while attempting to copy the project files. Please try again.' });
     }
 
-    //Make sure sourceforopen gets changed with a real uuid
-    await copyS3Folder(`base/${template}/${projectType}`, `code/sourceforopen/${projectName}`)
-    
+    return response.status(201).json({ projectPath: `code/sourceforopen/${projectName}` });
 });
 
 export default router;
