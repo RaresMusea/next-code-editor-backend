@@ -1,6 +1,5 @@
-import { Express } from "express";
-import { copyS3Folder, fetchS3Folder } from "./aws";
-import path from "path";
+import {Express} from "express";
+import {copyS3Folder} from "../aws/aws";
 import express from "express";
 
 export function initHttp(app: Express) {
@@ -8,8 +7,7 @@ export function initHttp(app: Express) {
 
     app.post("/project", async (req, res) => {
         // Hit a database to ensure this slug isn't taken already
-        const { replId, language } = req.body;
-        console.log(req.body);
+        const {replId, language} = req.body;
 
         if (!replId) {
             res.status(400).send("Bad request");
