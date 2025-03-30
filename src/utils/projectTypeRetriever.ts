@@ -9,7 +9,8 @@ export const getProjectType = (template: string, framework?: string): string | u
         },
         "Empty project": {
             "": "empty"
-        }
+        },
+        "Typescript": { 'Next.js': 'nextjs-basic' }
     };
 
     return projectTypes[template]?.[framework || ""] || undefined;

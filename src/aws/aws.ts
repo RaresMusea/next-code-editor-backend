@@ -14,6 +14,7 @@ import { logger } from "../logging/logger";
 
 interface FolderDetails {
     name: string;
+    path: string;
     lastModified: string | null;
 }
 
@@ -30,53 +31,102 @@ const s3 = new S3Client({
 
 export const getFolderDetails = async (key: string): Promise<FolderDetails[] | undefined> => {
     try {
+
+        const tokens: string[] = key.split('/');
+        const prefix: string = `${tokens[0]}/${tokens[1]}/`
+        const projectName = tokens[3];
+
         const params = {
             Bucket: process.env.S3_BUCKET ?? '',
             Prefix: key,
-            Delimiter: '/'
         };
 
         const command = new ListObjectsV2Command(params);
         const response = await s3.send(command);
 
-        const folders = response.CommonPrefixes?.map(folder =>
-            folder.Prefix!.replace(key, "").split("/")[0]
-        ).filter((value, index, self) => value && self.indexOf(value) === index) ?? [];
+        //     const folderDetails: FolderDetails[] = response.Contents
+        //         ? (await Promise.all(
+        //             response.Contents.map(async (elem) => {
+        //                 const elemKeyTokens = elem.Key?.split('/');
+        //                 let folderName: string = '';
 
-        const folderDetails: FolderDetails[] = await Promise.all(
-            folders.map(async (folderName) => {
-                const folderPath = `${key}${folderName}/`;
+        //                 if (elemKeyTokens && elemKeyTokens.length >= 4) {
+        //                     folderName = elemKeyTokens[3];
+        //                     console.log(folderName);
 
-                const subParams = {
-                    Bucket: process.env.S3_BUCKET ?? '',
-                    Prefix: folderPath
-                };
+        //                     const subParams = {
+        //                         Bucket: process.env.S3_BUCKET ?? '',
+        //                         Prefix: elem.Key
+        //                     };
 
-                const subCommand = new ListObjectsV2Command(subParams);
-                const subResponse = await s3.send(subCommand);
+        //                     const subCommand = new ListObjectsV2Command(subParams);
+        //                     const subResponse = await s3.send(subCommand);
 
-                const lastModified = subResponse.Contents
-                    ?.map(item => item.LastModified)
-                    .filter(Boolean)
-                    .sort((a, b) => b!.getTime() - a!.getTime())[0] || null;
+        //                     const lastModified = subResponse.Contents
+        //                         ?.map(item => item.LastModified)
+        //                         .filter(Boolean)
+        //                         .sort((a, b) => b!.getTime() - a!.getTime())[0] || null;
 
-                return {
-                    name: folderName,
-                    lastModified: lastModified ? lastModified.toDateString() : null
-                };
-            })
-        );
+        //                     console.log(lastModified);
 
-        return folderDetails;
+        //                     return {
+        //                         name: folderName,
+        //                         lastModified: lastModified ? lastModified.toDateString() : null
+        //                     };
+        //                 }
+        //             })
+        //         )).filter((item): item is FolderDetails => item !== undefined)
+        //         : [];
+        //     return folderDetails;
+        // } catch (error) {
+        //     logger.error(error as string);
+        //     return [];
+        // }
 
+        // console.log(folders);
+        if (response.Contents) {
+            const projects: FolderDetails[] = (await Promise.all(
+                response.Contents?.map(async (elem) => {
+                    const elemKeyTokens = elem.Key?.split('/');
+                    let folderName: string = '';
+
+                    if (elemKeyTokens && elemKeyTokens.length >= 4) {
+                        folderName = elemKeyTokens[3];
+
+                        const subParams = {
+                            Bucket: process.env.S3_BUCKET ?? '',
+                            Prefix: elem.Key
+                        };
+
+                        const subCommand = new ListObjectsV2Command(subParams);
+                        const subResponse = await s3.send(subCommand);
+
+                        const lastModified = subResponse.Contents
+                            ?.map(item => item.LastModified)
+                            .filter(Boolean)
+                            .sort((a, b) => b!.getTime() - a!.getTime())[0] || null;
+
+                        return {
+                            name: folderName,
+                            path: elemKeyTokens.slice(0, 4).join("/"),
+                            lastModified: lastModified ? lastModified.toDateString() : null
+                        };
+                    }
+                })
+            )).filter((item): item is FolderDetails => item !== undefined);
+
+            const uniqueProjects = Array.from(
+                new Map(projects.map(project => [project.name, project])).values()
+            );
+
+            return uniqueProjects;
+        }
     } catch (error) {
-        logger.error(error as string);
         return [];
     }
 }
 
 export const folderExists = async (key: string): Promise<boolean> => {
-    console.warn(key);
     const params = {
         Bucket: process.env.S3_BUCKET ?? '',
         Prefix: `${key}`,
@@ -89,6 +139,29 @@ export const folderExists = async (key: string): Promise<boolean> => {
         if (response.Contents && response.Contents.length > 0) {
             console.warn(response.Contents);
             return response.Contents.some(c => c.Key?.startsWith(params.Prefix));
+        }
+    } catch (error) {
+        logger.awsError(error as string);
+        return false;
+    }
+
+    return false;
+}
+
+export const projectNameExists = async (searchQuery: string, projectName: string): Promise<boolean> => {
+    const params = {
+        Bucket: process.env.S3_BUCKET ?? '',
+        Prefix: searchQuery,
+    };
+
+    console.warn(`Searching for ${projectName} in ${searchQuery}`);
+
+    try {
+        const command = new ListObjectsV2Command(params);
+        const response = await s3.send(command);
+
+        if (response.Contents && response.Contents.length > 0) {
+            return response.Contents.some(c => c.Key?.includes(projectName));
         }
     } catch (error) {
         logger.awsError(error as string);
@@ -163,7 +236,7 @@ export async function copyS3Folder(sourcePrefix: string, destinationPrefix: stri
         // List all objects in the source folder
         const listParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Prefix: sourcePrefix,
+            Prefix: `${sourcePrefix}`,
             ContinuationToken: continuationToken
         };
 
@@ -201,7 +274,7 @@ export async function deleteS3File(sourceKey: string): Promise<void> {
     try {
         const deleteParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Key: `code/${replId}/${sourceKey}`
+            Key: `code/${sourceKey}`
         };
 
         const deleteCommand = new DeleteObjectCommand(deleteParams);
@@ -217,8 +290,8 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
     try {
         const copyParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            CopySource: `${process.env.S3_BUCKET}/code/${replId}/${sourceKey}`,
-            Key: `code/${replId}/${destinationKey}`,
+            CopySource: `${process.env.S3_BUCKET}/code/${sourceKey}`,
+            Key: `code/${destinationKey}`,
             ACL: ObjectCannedACL.private
         };
 
@@ -235,9 +308,7 @@ export async function renameS3File(sourceKey: string, destinationKey: string): P
 
 export async function renameS3Directory(oldPrefix: string, newPrefix: string): Promise<void> {
     try {
-        const basePath: string = `code/${replId}`;
-
-        await copyS3Folder(`${basePath}/${oldPrefix}`, `${basePath}/${newPrefix}`);
+        await copyS3Folder(`code/${oldPrefix}`, `code/${newPrefix}`);
         await deleteS3Folder(oldPrefix);
         logger.awsInfo(`Renamed directory ${oldPrefix} to ${newPrefix}.`)
     } catch (error) {
@@ -250,7 +321,7 @@ export async function deleteS3Folder(prefix: string | undefined): Promise<void> 
     try {
         const listParams = {
             Bucket: process.env.S3_BUCKET ?? "",
-            Prefix: `code/${replId}/${prefix}`
+            Prefix: `code/${prefix}`
         };
 
         const listCommand = new ListObjectsV2Command(listParams);
@@ -284,27 +355,14 @@ export async function deleteS3Folder(prefix: string | undefined): Promise<void> 
     }
 }
 
-// export const saveToS3 = async (key: string, filePath: string, content: string): Promise<void> => {
-//     const params = {
-//         Bucket: process.env.S3_BUCKET ?? "",
-//         Key: `${key}${filePath}`,
-//         Body: content,
-//         ACL: ObjectCannedACL.private
-//     }
-
-//     const putObjectCommand = new PutObjectCommand(params);
-//     await s3.send(putObjectCommand);
-// }
-
 export const saveToS3 = async (filePath: string, content: string | ReadableStream): Promise<void> => {
     const params = {
         Bucket: process.env.S3_BUCKET ?? "",
-        Key: `code/sourceforopen${filePath}`,
+        Key: `code/${filePath}`,
         Body: content,
         ACL: ObjectCannedACL.private
     };
-
-
+    
     const upload = new Upload({
         client: s3,
         params: params

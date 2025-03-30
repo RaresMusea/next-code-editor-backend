@@ -76,7 +76,7 @@ class ServerLogger {
     }
 
     public error(message: string): void {
-        this.log(message, LogLevel.AWS_ERROR);
+        this.log(message, LogLevel.ERROR);
     }
 }
 
