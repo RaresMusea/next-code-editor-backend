@@ -6,7 +6,7 @@ import { ExtendedFile, fetchDir, fetchFileContent, fileExists, saveFile } from "
 import fs from "fs/promises";
 import { TerminalManager } from "../pseudoterminal/pty";
 import { handleRenameError } from "../error_handler";
-import { validateRenaming, ValidationResult } from "../validation/validators";
+import { validateDeletion, validateRenaming, ValidationResult } from "../validation/validators";
 import { logger } from "../logging/logger";
 
 const terminalManager = new TerminalManager();
@@ -27,6 +27,8 @@ export function initWs(httpServer: HttpServer) {
         // Auth checks should happen here
         logger.debug(`Connected socket with ID ${socket}`);
         const projectId: string = socket.handshake.query.roomId as string;
+        const projectRoot = projectId.slice(0, projectId.lastIndexOf("/"));
+        console.log(projectRoot);
 
         if (!projectId) {
             socket.disconnect();
@@ -34,7 +36,7 @@ export function initWs(httpServer: HttpServer) {
             return;
         }
 
-        const localProjectId: string = projectId.replace('code/', '');
+        const localProjectId: string = projectRoot.replace('code/', '');
 
         //Before: code/sourceforopen/TestProj
 
@@ -43,20 +45,20 @@ export function initWs(httpServer: HttpServer) {
         const editorRoot: string = path.join(__dirname, `${localRoot}/${localProjectId}`);
 
         try {
-            await fetchS3Folder(s3Prefix, localDir);
+            await fetchS3Folder(projectRoot, editorRoot);
             socket.emit("loaded", {
-                rootContent: await fetchDir(editorRoot, "")
+                rootContent: await fetchDir(localDir, "")
             });
         }
         catch (error) {
             logger.error(`${error}`);
         }
 
-        initHandlers(socket, localProjectId);
+        initHandlers(socket, projectRoot.replace('code/', ''), localProjectId);
     });
 }
 
-function initHandlers(socket: Socket, projectId: string) {
+function initHandlers(socket: Socket, projectId: string, pathForTem: string) {
 
     socket.on("disconnect", () => {
         logger.debug("User disconnected.");
@@ -64,6 +66,7 @@ function initHandlers(socket: Socket, projectId: string) {
 
     socket.on("fetchDir", async (dir: string, callback) => {
         //const dirPath = path.join(__dirname, `../tmp/${replId}/${dir}`);
+        console.log(projectId)
         const dirPath = path.join(__dirname, `${localRoot}/${projectId}/${dir}`);
         const contents = await fetchDir(dirPath, dir);
         callback(contents);
@@ -83,7 +86,7 @@ function initHandlers(socket: Socket, projectId: string) {
 
         try {
             await saveFile(absoluteNewFilePath, '');
-            await saveToS3(`${projectId}/${parentDir}/${newName}`, '');
+            await saveToS3(`${projectId}${parentDir}/${newName}`, '');
             logger.info(`[INFO]: Created file ${newName} in ${parentDir}.`);
 
             socket.emit('fileCreated', {
@@ -103,6 +106,7 @@ function initHandlers(socket: Socket, projectId: string) {
 
     socket.on("createDirectory", async ({ newName, parentDir }: { newName: string, parentDir: string }) => {
         const absoluteNewDirPath: string = path.join(__dirname, `${localRoot}/${projectId}${parentDir}/${newName}`);
+        const normalizedParentDir = parentDir.slice(1);
 
         if (fileExists(absoluteNewDirPath)) {
             console.error(`[ERROR]: Directory ${newName} already exists in ${parentDir}!`);
@@ -115,7 +119,7 @@ function initHandlers(socket: Socket, projectId: string) {
 
         try {
             await fs.mkdir(absoluteNewDirPath);
-            await saveToS3(`${projectId}/${parentDir}/${newName}/`, '');
+            await saveToS3(`${projectId}/${normalizedParentDir}/${newName}/`, '');
             logger.info(`Created directory ${newName} in ${parentDir}.`);
 
             socket.emit('directoryCreated', {
@@ -125,7 +129,7 @@ function initHandlers(socket: Socket, projectId: string) {
             });
         }
         catch (error) {
-            logger.error(`[ERROR]: Unable to create directory ${newName} in ${parentDir}!`);
+            logger.error(`Unable to create directory ${newName} in ${parentDir}!`);
             socket.emit('directoryCreationFailed', {
                 message: "Unable to create directory",
                 description: `An error occurred while attempting to create directory ${newName}!`
@@ -148,9 +152,16 @@ function initHandlers(socket: Socket, projectId: string) {
         const normalizedPath = filePath.slice(1);
         const fullPath: string = path.join(__dirname, `${localRoot}/${projectId}/${normalizedPath}`);
 
+        const deletionValidation: ValidationResult = validateDeletion(filePath, type);
+
+        if (!deletionValidation.isValid) {
+            socket.emit('entityDeletionFailed', { message: 'Deletion failed', description: deletionValidation?.message });
+            return;
+        }
+
         if (!fileExists(fullPath)) {
             logger.error(`${fullPath} does not exist or it was removed earlier!`);
-            socket.emit("deleteError", {
+            socket.emit("entityDeletionFailed", {
                 message: "Deletion failed",
                 description: `${type} ${filePath} does not exist or it was removed earlier!`
             });
@@ -174,7 +185,7 @@ function initHandlers(socket: Socket, projectId: string) {
         } catch (error) {
             logger.error(`Unable to delete ${filePath}!\n${error}`);
             console.log(error);
-            socket.emit("deleteError", {
+            socket.emit("entityDeletionFailed", {
                 message: "Deletion failed",
                 description: `An error occurred while attempting to delete ${filePath}!`
             });
@@ -188,11 +199,19 @@ function initHandlers(socket: Socket, projectId: string) {
         const fullPath = path.join(__dirname, `${localRoot}/${projectId}/${filePath}`);
         await saveFile(fullPath, content);
 
-        await saveToS3(`${projectId}/${filePath}`, content);
+        let appPath = filePath;
+
+        if (appPath.startsWith('/')) {
+            appPath = appPath.slice(1);
+        }
+
+        console.log(appPath);
+
+        await saveToS3(`${projectId}/${appPath}`, content);
     });
 
     socket.on("requestTerminal", async () => {
-        terminalManager.createPty(socket.id, projectId, (data, id) => {
+        terminalManager.createPty(socket.id, pathForTem, (data, id) => {
             socket.emit('terminal', {
                 data: Buffer.from(data, "utf-8")
             });
@@ -242,7 +261,7 @@ async function renameEntityHandler(socket: Socket,
     }
 
     try {
-        await fs.access(path.join(`${localRoot}/${projectId}`, `${parent}/${newName}`));
+        await fs.access(`${path.join(__dirname, `${localRoot}/${projectId}`)}/${parent}/${newName}`);
         logger.info(`${isDeepRename ? 'Deep-renamed' : 'Renamed'} ${parent}/${oldName} to ${parent}/${newName}.`);
 
         let response: { oldPath: string; newPath: string; newName: string; type: string, children?: ExtendedFile[] } = {
@@ -265,6 +284,7 @@ async function renameEntityHandler(socket: Socket,
             socket.emit("renameSuccessful", response);
         }
     } catch (error) {
+        console.error(error);
         socket.emit("renameError", { message: "Renaming failed", description: `Unable to rename file ${parent}/${oldName}!` });
     }
 };

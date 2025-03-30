@@ -82,13 +82,26 @@ export const validateRenaming = async (data: RenameData): Promise<ValidationResu
     return { isValid: true };
 };
 
+export const validateDeletion = (filePath: string, type: string): ValidationResult => {
+
+    if (type === 'directory' && (filePath.split('/').length) === 2) {
+        return {
+            isValid: false,
+            message: 'Root directory cannot be deleted. For that, please delete the entire project!'
+        };
+    }
+
+    return { isValid: true }
+}
+
 export const validateProjectCreation = (data: ProjectCreationData): ValidationResult => {
     const { projectName, description, framework, template } = data;
-    const availableTemplates: string[] = ['Java', 'C++', 'Empty project'];
+    const availableTemplates: string[] = ['Java', 'C++', 'Empty project', 'Typescript'];
     const availableFrameworks: Record<string, string[]> = {
         Java: ["Spring", "No framework"],
         "C++": ["No frameworks"],
-        "Empty project": []
+        "Empty project": [],
+        Typescript: ["Next.js"]
     };
 
     const isValidProjectName: boolean = /^[a-zA-Z0-9_-]+$/.test(projectName);
